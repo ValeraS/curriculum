@@ -30,84 +30,83 @@ class ChallengeFile {
   }
 
   readChunks() {
-    // todo: make this work async
     // todo: make sure it works with encodings
-    let data = fs.readFileSync(this.filePath());
-    let lines = data.toString().split(/(?:\r\n|\r|\n)/g);
-    let chunks = {};
-    let readingChunk = null;
-    let currentParagraph = [];
+    return fs.readFile(this.filePath()).then(data => {
+      let lines = data.toString().split(/(?:\r\n|\r|\n)/g);
+      let chunks = {};
+      let readingChunk = null;
+      let currentParagraph = [];
 
-    function removeLeadingEmptyLines(array) {
-      let emptyString = /^\s*$/;
-      while (array && Array.isArray(array) && emptyString.test(array[0])) {
-        array.shift();
-      }
-    }
-
-    lines.forEach(line => {
-      let chunkEnd = /(<!|\/\*)--end--/;
-      let chunkStart = /(<!|\/\*)--(\w+)--/;
-
-      line = line.toString();
-
-      function pushParagraph() {
-        removeLeadingEmptyLines(currentParagraph);
-        chunks[ readingChunk ].push(currentParagraph.join('\n'));
-        currentParagraph = [];
-      }
-
-      if (chunkEnd.test(line)) {
-        if (!readingChunk) {
-          throw 'Encountered --end-- without being in a chunk';
+      function removeLeadingEmptyLines(array) {
+        let emptyString = /^\s*$/;
+        while (array && Array.isArray(array) && emptyString.test(array[0])) {
+          array.shift();
         }
-        if (currentParagraph.length) {
+      }
+
+      lines.forEach(line => {
+        let chunkEnd = /(<!|\/\*)--end--/;
+        let chunkStart = /(<!|\/\*)--(\w+)--/;
+
+        line = line.toString();
+
+        function pushParagraph() {
+          removeLeadingEmptyLines(currentParagraph);
+          chunks[readingChunk].push(currentParagraph.join('\n'));
+          currentParagraph = [];
+        }
+
+        if (chunkEnd.test(line)) {
+          if (!readingChunk) {
+            throw 'Encountered --end-- without being in a chunk';
+          }
+          if (currentParagraph.length) {
+            pushParagraph();
+          } else {
+            removeLeadingEmptyLines(chunks[readingChunk]);
+          }
+          readingChunk = null;
+        } else if (readingChunk === 'description' && line === paragraphBreak) {
           pushParagraph();
-        } else {
-          removeLeadingEmptyLines(chunks[readingChunk]);
+        } else if (chunkStart.test(line)) {
+          let chunkName = line.match(chunkStart)[2];
+          if (readingChunk) {
+            throw `Encountered chunk ${chunkName} start ` +
+              `while already reading ${readingChunk}:
+            ${line}`;
+          }
+          readingChunk = chunkName;
+        } else if (readingChunk) {
+          if (!chunks[readingChunk]) {
+            chunks[readingChunk] = [];
+          }
+          if (line.startsWith(jsonLinePrefix)) {
+            line = JSON.parse(line.slice(jsonLinePrefix.length));
+            chunks[readingChunk].push(line);
+          } else if (readingChunk === 'description') {
+            currentParagraph.push(line);
+          } else {
+            chunks[readingChunk].push(line);
+          }
         }
-        readingChunk = null;
-      } else if (readingChunk === 'description' && line === paragraphBreak) {
-        pushParagraph();
-      } else if (chunkStart.test(line)) {
-        let chunkName = line.match(chunkStart)[ 2 ];
-        if (readingChunk) {
-          throw `Encountered chunk ${chunkName} start `
-          + `while already reading ${readingChunk}:
-           ${line}`;
-        }
-        readingChunk = chunkName;
-      } else if (readingChunk) {
-        if (!chunks[ readingChunk ]) {
-          chunks[ readingChunk ] = [];
-        }
-        if (line.startsWith(jsonLinePrefix)) {
-          line = JSON.parse(line.slice(jsonLinePrefix.length));
-          chunks[ readingChunk ].push(line);
-        } else if (readingChunk === 'description') {
-          currentParagraph.push(line);
-        } else {
-          chunks[ readingChunk ].push(line);
-        }
+      });
+
+      // hack to deal with solutions field being an array of a single string
+      // instead of an array of lines like some other fields
+      if (chunks.solutions) {
+        chunks.solutions = [chunks.solutions.join('\n')];
       }
+
+      Object.keys(chunks).forEach(key => {
+        removeLeadingEmptyLines(chunks[key]);
+      });
+
+      return Promise.resolve(chunks);
     });
-
-    // hack to deal with solutions field being an array of a single string
-    // instead of an array of lines like some other fields
-    if (chunks.solutions) {
-      chunks.solutions = [ chunks.solutions.join('\n') ];
-    }
-
-    Object.keys(chunks).forEach(key => {
-      removeLeadingEmptyLines(chunks[key]);
-    });
-
-    // console.log(JSON.stringify(chunks, null, 2));
-    return chunks;
   }
 }
 
-export {ChallengeFile};
+export { ChallengeFile };
 
 class UnpackedChallenge {
   constructor(targetDir, challengeJson, index) {
@@ -130,8 +129,7 @@ class UnpackedChallenge {
   }
 
   unpack() {
-    this.challengeFile()
-      .write(this.unpackedHTML());
+    this.challengeFile().write(this.unpackedHTML());
   }
 
   challengeFile() {
@@ -140,8 +138,8 @@ class UnpackedChallenge {
 
   baseName() {
     // eslint-disable-next-line no-nested-ternary
-    let prefix = ((this.index < 10) ? '00' : (this.index < 100) ? '0' : '')
-      + this.index;
+    let prefix =
+      (this.index < 10 ? '00' : this.index < 100 ? '0' : '') + this.index;
     return `${prefix}-${dasherize(this.challenge.title)}-${this.challenge.id}`;
   }
 
@@ -167,7 +165,7 @@ class UnpackedChallenge {
       }
     });
 
-    if (out[ out.length - 1 ] === paragraphBreak) {
+    if (out[out.length - 1] === paragraphBreak) {
       out.pop();
     }
     return out;
@@ -253,7 +251,7 @@ class UnpackedChallenge {
     // Note: none of the challenges have more than one solution
     // todo: should we deal with multiple solutions or not?
     if (this.challenge.solutions && this.challenge.solutions.length > 0) {
-      let solution = this.challenge.solutions[ 0 ];
+      let solution = this.challenge.solutions[0];
       text.push(solution);
     }
     text.push('</script><!--end-->');
@@ -269,13 +267,16 @@ class UnpackedChallenge {
     text.push('');
     text.push('<h2>Tests</h2>');
     text.push('<script class="unpacked tests">');
-    text.push(`test(\'${this.challenge.title} challenge tests\', ` +
-      'function(t) {');
+    text.push(
+      `test(\'${this.challenge.title} challenge tests\', ` + 'function(t) {'
+    );
     text.push('let assert = addAssertsToTapTest(t);');
-    text.push('let code = document.getElementById(\'solution\').innerText;');
-    text.push('t.plan(' +
-      (this.challenge.tests ? this.challenge.tests.length : 0) +
-      ');');
+    text.push("let code = document.getElementById('solution').innerText;");
+    text.push(
+      't.plan(' +
+        (this.challenge.tests ? this.challenge.tests.length : 0) +
+        ');'
+    );
     text.push('/*--tests--*/');
     text.push(this.expandedTests(this.challenge.tests).join('\n'));
     text.push('/*--end--*/');
@@ -289,5 +290,4 @@ class UnpackedChallenge {
   }
 }
 
-export {UnpackedChallenge};
-
+export { UnpackedChallenge };
